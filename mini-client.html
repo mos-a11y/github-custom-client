@@ -47,6 +47,13 @@ input{padding:8px 10px;border:1px solid var(--border);border-radius:6px;
    这个文件里【没有任何真实令牌】。
    令牌由使用者自己在页面里填写，只存在他自己的浏览器 localStorage 里。
    如果你要发布自己的修改版，千万不要把令牌写进代码。
+
+   ⚠️ 使用条款（详见 NOTICE.md）：
+   1. 禁止对外宣传 —— 不得发到社交平台 / 视频站 / 技术社区推广，
+      不得提交到导航站或 Awesome 列表，不得用于商业宣传。
+   2. 必须署名 —— 任何公开使用都要标注原项目出处：
+      https://github.com/mos-a11y/github-custom-client
+   二次分发请保留 NOTICE.md 文件本身，不要删改。
    ===================================================================== */
 
 var API = 'https://api.github.com';
@@ -119,6 +126,7 @@ function route(){
 window.addEventListener('hashchange', route);
 
 /* ---------- 共用外壳 ---------- */
+var PROJECT_URL = 'https://github.com/mos-a11y/github-custom-client';
 function shell(title, inner){
   app.innerHTML =
     '<div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">' +
@@ -126,7 +134,14 @@ function shell(title, inner){
       '<a class="btn" href="#/">🏠 首页</a>' +
       '<a class="btn" href="#/settings">⚙️ 设置</a>' +
       (getToken() ? '<button class="btn" id="btnOut">🚪 退出</button>' : '') +
-    '</div>' + inner;
+    '</div>' + inner +
+    /* 每页底部固定署名 —— 不得删除，这是使用条款的要求 */
+    '<div style="margin-top:20px;padding-top:12px;border-top:1px solid var(--border);' +
+      'text-align:center;color:var(--fg-muted);font-size:11px;line-height:1.7">' +
+      '基于 <a href="' + PROJECT_URL + '" target="_blank" rel="noopener">' +
+      'mos-a11y/github-custom-client</a> · MIT（附加署名与非宣传条款）<br>' +
+      '禁止对外宣传 · 公开使用须标注原项目出处' +
+    '</div>';
 
   var b = document.getElementById('btnOut');
   if (b) b.onclick = function(){
@@ -292,6 +307,17 @@ function renderSettings(){
         '<button class="btn" id="btnClear">清掉本机令牌</button>' +
       '</div>' +
       '<div id="rate" class="muted" style="margin-top:10px"></div>' +
+    '</div></div>' +
+    '<div class="card"><div class="in" style="border-left:3px solid var(--accent)">' +
+      '<b>📜 使用条款</b>' +
+      '<div class="muted" style="margin-top:6px">' +
+        '· <b>禁止对外宣传</b>：不得发到社交平台 / 视频站 / 技术社区推广，' +
+        '不得提交到导航站或 Awesome 列表<br>' +
+        '· <b>必须署名</b>：公开使用需标注原项目 ' +
+        '<a href="https://github.com/mos-a11y/github-custom-client" target="_blank" rel="noopener">' +
+        'mos-a11y/github-custom-client</a><br>' +
+        '· 二次分发请保留 <code>NOTICE.md</code>' +
+      '</div>' +
     '</div></div>' +
     '<div class="card"><div class="in">' +
       '<b>怎么改这个页面</b>' +
