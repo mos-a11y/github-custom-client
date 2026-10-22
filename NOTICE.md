@@ -1,5 +1,9 @@
 # 使用条款 · 转载与署名要求
 
+> 项目：**github-custom-client** — 从零做一个属于自己的 GitHub 客户端（单文件 HTML + REST API）
+> 原项目地址：<https://github.com/mos-a11y/github-custom-client>
+> 原作者：mos-a11y
+
 > 本条款是 MIT 许可之外的**附加要求**。
 > 使用、复制、修改、分发本项目（含其衍生版本）即视为同意以下全部条款。
 
