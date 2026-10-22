@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GitHub 迷你客户端 · 可改模板</title>
+<style>
+/* ===== 主题：改这里就能换配色（详见 docs/02-自定义.md） ===== */
+:root{
+  --bg:#0d1117; --bg-sub:#161b22; --fg:#e6edf3; --fg-muted:#8b949e;
+  --border:#30363d; --accent:#58a6ff; --green:#3fb950; --red:#f85149;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+     font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:900px;margin:0 auto;padding:16px}
+.card{background:var(--bg-sub);border:1px solid var(--border);border-radius:8px;margin-bottom:10px}
+.card .in{padding:14px}
+.muted{color:var(--fg-muted);font-size:12px}
+.btn{padding:6px 12px;border:1px solid var(--border);border-radius:6px;
+     background:var(--bg-sub);color:var(--fg);cursor:pointer;font:inherit}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:#238636;border-color:#2ea043;color:#fff}
+input{padding:8px 10px;border:1px solid var(--border);border-radius:6px;
+      background:var(--bg);color:var(--fg);font:inherit;width:100%}
+.spinner{width:20px;height:20px;margin:20px auto;border:2px solid var(--border);
+         border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.errbox{background:#2d0f0f;border:1px solid var(--red);border-radius:6px;padding:12px;color:var(--red)}
+.badge{display:inline-block;padding:0 7px;border-radius:2em;font-size:11px;
+       border:1px solid var(--border);background:var(--bg);color:var(--fg-muted)}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="spinner"></div>
+</div>
+
+<script>
+/* =====================================================================
+   GitHub 迷你客户端 —— 用来学习和二次开发的模板
+   全部逻辑约 200 行。读完它，你就能改出自己的版本。
+
+   ⚠️ 安全提醒：
+   这个文件里【没有任何真实令牌】。
+   令牌由使用者自己在页面里填写，只存在他自己的浏览器 localStorage 里。
+   如果你要发布自己的修改版，千万不要把令牌写进代码。
+   ===================================================================== */
+
+var API = 'https://api.github.com';
+var app = document.getElementById('app');
+
+/* ---------- 令牌读写（只在本机，不上传） ---------- */
+function getToken(){ try{ return localStorage.getItem('gh_token') || ''; }catch(e){ return ''; } }
+function setToken(t){ try{ localStorage.setItem('gh_token', t); }catch(e){} }
+function delToken(){ try{ localStorage.removeItem('gh_token'); }catch(e){} }
+
+/* ---------- 唯一的 API 出口 ---------- */
+function gh(path, opts){
+  opts = opts || {};
+  var headers = {
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28'
+  };
+  var t = getToken();
+  if (t) headers.Authorization = 'Bearer ' + t;
+  if (opts.headers) for (var k in opts.headers) headers[k] = opts.headers[k];
+
+  return fetch(API + path, {
+    method: opts.method || 'GET',
+    headers: headers,
+    body: opts.body
+  }).then(function(r){
+    if (r.status === 204) return {};               // 触发 workflow 成功，body 是空的
+    return r.json().catch(function(){ return {}; });
+  }).then(function(d){
+    if (d && d.message && !d.login && !d.total_count && d.message.indexOf('API rate') < 0){
+      throw new Error(d.message);
+    }
+    return d;
+  });
+}
+
+/* ---------- 工具 ---------- */
+/* 所有用户输入渲染前必须过这个函数，否则 XSS */
+function esc(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function ago(d){
+  if (!d) return '';
+  var s = (Date.now() - new Date(d).getTime()) / 1000;
+  if (s < 60) return '刚刚';
+  if (s < 3600) return Math.floor(s/60) + ' 分钟前';
+  if (s < 86400) return Math.floor(s/3600) + ' 小时前';
+  if (s < 2592000) return Math.floor(s/86400) + ' 天前';
+  return String(d).slice(0,10);
+}
+
+/* ---------- 路由表 ---------- */
+var ROUTES = [
+  [/^#\/repo\/([^/]+)\/([^/]+)$/, renderRepo],
+  [/^#\/user\/([^/]+)$/,          renderUser],
+  [/^#\/settings$/,               renderSettings],
+  [/^#\/login$/,                  renderLogin],
+  [/^#?\/?$/,                     renderHome]
+];
+function route(){
+  var h = location.hash || '#/';
+  for (var i = 0; i < ROUTES.length; i++){
+    var m = h.match(ROUTES[i][0]);
+    if (m) return ROUTES[i][1].apply(null, m.slice(1));
+  }
+  renderHome();
+}
+window.addEventListener('hashchange', route);
+
+/* ---------- 共用外壳 ---------- */
+function shell(title, inner){
+  app.innerHTML =
+    '<div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">' +
+      '<b style="font-size:18px">' + esc(title) + '</b>' +
+      '<a class="btn" href="#/">🏠 首页</a>' +
+      '<a class="btn" href="#/settings">⚙️ 设置</a>' +
+      (getToken() ? '<button class="btn" id="btnOut">🚪 退出</button>' : '') +
+    '</div>' + inner;
+
+  var b = document.getElementById('btnOut');
+  if (b) b.onclick = function(){
+    if (confirm('确定退出？会清掉本机保存的令牌')) { delToken(); location.hash = '#/login'; route(); }
+  };
+}
+function fail(e, host){
+  host.innerHTML = '<div class="errbox">出错了：' + esc(e.message) +
+    '<br><br>常见原因：401 令牌失效 · 403 额度用完 · 404 仓库不存在或没权限</div>';
+}
+
+/* ---------- 登录页 ---------- */
+function renderLogin(){
+  app.innerHTML =
+    '<div class="card"><div class="in">' +
+      '<h2 style="margin:0 0 6px">🔑 登录</h2>' +
+      '<p class="muted">粘贴你的 Personal Access Token。它只保存在你自己的浏览器里，' +
+      '不会发到任何服务器。</p>' +
+      '<input id="tk" type="password" placeholder="ghp_ 或 github_pat_ 开头" style="margin:10px 0">' +
+      '<button class="btn primary" id="go">登录</button> ' +
+      '<a class="btn" href="https://github.com/settings/tokens" target="_blank" rel="noopener">去申请 ↗</a>' +
+      '<div id="msg" class="muted" style="margin-top:10px"></div>' +
+    '</div></div>';
+  document.getElementById('go').onclick = function(){
+    var t = document.getElementById('tk').value.trim();
+    if (!t) return;
+    var btn = this, msg = document.getElementById('msg');
+    btn.disabled = true; btn.textContent = '验证中…';
+    setToken(t);
+    gh('/user').then(function(u){
+      if (!u || !u.login) throw new Error('令牌无效');
+      location.hash = '#/'; route();
+    }).catch(function(e){
+      delToken();
+      msg.style.color = 'var(--red)'; msg.textContent = '失败：' + e.message;
+      btn.disabled = false; btn.textContent = '登录';
+    });
+  };
+}
+
+/* ---------- 首页：我的仓库 ---------- */
+function renderHome(){
+  if (!getToken()) return renderLogin();
+  shell('我的仓库', '<div class="spinner"></div>');
+  var host = app.lastChild;
+
+  gh('/user/repos?per_page=100&sort=updated').then(function(me){
+    return gh('/users/' + me.login + '/repos?per_page=100&sort=updated');
+  }).then(function(repos){
+    if (!Array.isArray(repos) || !repos.length){
+      app.innerHTML = '<div class="errbox">没有找到仓库</div>'; return;
+    }
+    shell('我的仓库（' + repos.length + '）',
+      repos.map(function(r){
+        return '<div class="card"><div class="in">' +
+          '<a href="#/repo/' + esc(r.full_name) + '" style="font-size:15px;font-weight:600">' +
+            esc(r.name) + '</a>' +
+          (r.private ? ' <span class="badge">私有</span>' : '') +
+          (r.fork ? ' <span class="badge">fork</span>' : '') +
+          (r.description ? '<div class="muted" style="margin-top:4px">' + esc(r.description) + '</div>' : '') +
+          '<div class="muted" style="margin-top:6px">' +
+            (r.language ? '🔵 ' + esc(r.language) + ' · ' : '') +
+            '⭐ ' + r.stargazers_count + ' · 🍴 ' + r.forks_count +
+            ' · 更新于 ' + ago(r.updated_at) +
+          '</div></div></div>';
+      }).join(''));
+  }).catch(function(e){ fail(e, app); });
+}
+
+/* ---------- 仓库页：文件树 + README ---------- */
+function renderRepo(owner, name){
+  if (!getToken()) return renderLogin();
+  var full = owner + '/' + name;
+  shell(esc(full), '<div class="spinner"></div>');
+
+  Promise.all([
+    gh('/repos/' + full),
+    gh('/repos/' + full + '/contents/').catch(function(){ return []; }),
+    gh('/repos/' + full + '/readme').catch(function(){ return null; })
+  ]).then(function(res){
+    var r = res[0], files = res[1], readme = res[2];
+
+    var tree = (Array.isArray(files) ? files : []).map(function(f){
+      var icon = f.type === 'dir' ? '📁' : '📄';
+      var size = f.size > 1024 ? (f.size/1024).toFixed(1) + ' KB' : f.size + ' B';
+      return '<div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">' +
+        '<span>' + icon + '</span>' +
+        '<a href="' + esc(f.html_url) + '" target="_blank" rel="noopener" style="flex:1">' +
+          esc(f.name) + '</a>' +
+        '<span class="muted">' + (f.type === 'dir' ? '' : size) + '</span></div>';
+    }).join('') || '<div class="muted">空仓库</div>';
+
+    var md = '';
+    if (readme && readme.content){
+      try {
+        var txt = decodeURIComponent(escape(atob(readme.content.replace(/\s/g, ''))));
+        md = '<pre style="white-space:pre-wrap;background:var(--bg);padding:12px;' +
+             'border-radius:6px;overflow:auto;max-height:400px;font-size:12px">' +
+             esc(txt.slice(0, 3000)) + '</pre>';
+      } catch(e){ md = '<div class="muted">README 解析失败</div>'; }
+    }
+
+    shell(esc(full),
+      '<div class="card"><div class="in">' +
+        (r.description ? '<div style="margin-bottom:8px">' + esc(r.description) + '</div>' : '') +
+        '<div class="muted">' +
+          (r.language ? '🔵 ' + esc(r.language) + ' · ' : '') +
+          '⭐ ' + r.stargazers_count + ' · 🍴 ' + r.forks_count + ' · 分支 ' + esc(r.default_branch) +
+        '</div>' +
+        '<div style="margin-top:8px">' +
+          '<a class="btn" href="' + esc(r.html_url) + '" target="_blank" rel="noopener">在 GitHub 打开 ↗</a> ' +
+          '<a class="btn" href="#/user/' + esc(owner) + '">看 ' + esc(owner) + '</a>' +
+        '</div>' +
+      '</div></div>' +
+      '<div class="card"><div class="in">' +
+        '<b>📂 文件</b><div style="margin-top:8px">' + tree + '</div>' +
+      '</div></div>' +
+      (md ? '<div class="card"><div class="in"><b>📖 README</b>' + md + '</div></div>' : ''));
+  }).catch(function(e){ fail(e, app); });
+}
+
+/* ---------- 用户页 ---------- */
+function renderUser(login){
+  if (!getToken()) return renderLogin();
+  shell('@' + esc(login), '<div class="spinner"></div>');
+  Promise.all([
+    gh('/users/' + login),
+    gh('/users/' + login + '/repos?per_page=50&sort=updated').catch(function(){ return []; })
+  ]).then(function(res){
+    var u = res[0], repos = res[1];
+    shell('@' + esc(u.login),
+      '<div class="card"><div class="in">' +
+        (u.avatar_url ? '<img src="' + esc(u.avatar_url) + '" style="width:60px;height:60px;border-radius:50%" alt="">' : '') +
+        '<div style="margin-top:8px"><b>' + esc(u.name || u.login) + '</b></div>' +
+        (u.bio ? '<div class="muted" style="margin-top:4px">' + esc(u.bio) + '</div>' : '') +
+        '<div class="muted" style="margin-top:6px">' +
+          '公开仓库 ' + u.public_repos + ' · 粉丝 ' + u.followers + ' · 关注 ' + u.following +
+          ' · 建号 ' + String(u.created_at || '').slice(0,10) +
+        '</div>' +
+        '<div style="margin-top:8px">' +
+          '<a class="btn" href="' + esc(u.html_url) + '" target="_blank" rel="noopener">主页 ↗</a>' +
+        '</div>' +
+      '</div></div>' +
+      (Array.isArray(repos) ? repos.map(function(r){
+        return '<div class="card"><div class="in">' +
+          '<a href="#/repo/' + esc(r.full_name) + '">' + esc(r.name) + '</a>' +
+          (r.description ? '<div class="muted">' + esc(r.description) + '</div>' : '') +
+          '<div class="muted">⭐ ' + r.stargazers_count + ' · ' + ago(r.updated_at) + '</div>' +
+        '</div></div>';
+      }).join('') : ''));
+  }).catch(function(e){ fail(e, app); });
+}
+
+/* ---------- 设置页 ---------- */
+function renderSettings(){
+  shell('⚙️ 设置',
+    '<div class="card"><div class="in">' +
+      '<b>令牌状态</b>' +
+      '<div class="muted" style="margin-top:6px">' +
+        (getToken() ? '已登录（令牌保存在本机浏览器中）' : '未登录') + '</div>' +
+      '<div style="margin-top:10px">' +
+        '<button class="btn" id="btnRate">查剩余额度</button> ' +
+        '<button class="btn" id="btnClear">清掉本机令牌</button>' +
+      '</div>' +
+      '<div id="rate" class="muted" style="margin-top:10px"></div>' +
+    '</div></div>' +
+    '<div class="card"><div class="in">' +
+      '<b>怎么改这个页面</b>' +
+      '<div class="muted" style="margin-top:6px">' +
+        '· 改配色：编辑顶部 <code>:root</code> 里的 CSS 变量<br>' +
+        '· 加菜单：往 <code>ROUTES</code> 数组加一项<br>' +
+        '· 加页面：写一个 <code>renderXxx()</code> 再注册进路由<br>' +
+        '· 完整教程见同仓库的 <code>docs/02-自定义.md</code>' +
+      '</div>' +
+    '</div></div>');
+
+  document.getElementById('btnRate').onclick = function(){
+    var out = document.getElementById('rate');
+    out.textContent = '查询中…';
+    gh('/rate_limit').then(function(r){
+      var c = r.rate || {};
+      out.textContent = '核心 ' + c.remaining + '/' + c.limit +
+        ' · 搜索 ' + (r.search ? r.search.remaining : '-') +
+        ' · 重置时间 ' + new Date(c.reset * 1000).toLocaleString();
+    }).catch(function(e){ out.textContent = '失败：' + e.message; });
+  };
+  document.getElementById('btnClear').onclick = function(){
+    if (confirm('清掉本机令牌？')){ delToken(); location.hash = '#/login'; route(); }
+  };
+}
+
+/* ---------- 启动 ---------- */
+route();
+</script>
+</body>
+</html>
